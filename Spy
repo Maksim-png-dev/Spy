@@ -523,3 +523,137 @@ InfoButtonsScroll.ZIndex = 11
 InfoButtonsScroll.CanvasSize = UDim2.new(0, 0, 1, 0)
 InfoButtonsScroll.ScrollBarThickness = 8
 InfoButtonsScroll.VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Left
+        else
+            BlockRemote.Text = "Block remote from firing"
+            BlockRemote.TextColor3 = Color3.fromRGB(250, 251, 255)
+        end
+        local iRemote = table.find(IgnoreList, lookingAt)
+        if iRemote then
+            IgnoreRemote.Text = "Stop ignoring remote"
+            IgnoreRemote.TextColor3 = Color3.fromRGB(127, 143, 166)
+        else
+            IgnoreRemote.Text = "Ignore remote"
+            IgnoreRemote.TextColor3 = Color3.fromRGB(250, 251, 255)
+        end
+        InfoFrameOpen = true
+    end)
+    -- insert them into a connections table in order to be able to disconnect all of them
+    table.insert(connections, connection)
+end)
+
+
+-- Main function: add a remote to the list (event: is it a RemoteEvent?, remote: the remote fired, ...: the args)
+function addToList(event, remote, ...)
+    -- set thread context since this is running in a game thread
+    local currentId = (get_thread_context or syn.get_thread_identity)()
+    ;(set_thread_context or syn.set_thread_identity)(7)
+    if not remote then return end
+
+    -- important variables
+    local name = remote.Name
+    local args = {...}
+
+    -- call the FindRemote function to find this specific remote with these args
+    local i = FindRemote(remote, args)
+
+    -- if the remote hasn't been found
+    if not i then
+        -- add remote to remotes table (important)
+        table.insert(remotes, remote)
+
+        local rButton = clone(RemoteButton)
+        -- add all useful info about the remote to tables
+        remoteButtons[#remotes] = rButton.Number
+        remoteArgs[#remotes] = args
+        remoteScripts[#remotes] = (isSynapse() and getcallingscript() or rawget(getfenv(0), "script"))
+
+        -- clone a little baby of the remotebutton
+        rButton.Parent = RemoteScrollFrame
+        rButton.Visible = true
+        local numberTextsize = getTextSize(TextService, rButton.Number.Text, rButton.Number.TextSize, rButton.Number.Font, Vector2.new(math.huge, math.huge))
+        rButton.RemoteName.Position = UDim2.new(0,numberTextsize.X + 10, 0, 0)
+        if name then
+            rButton.RemoteName.Text = name
+        end
+        if not event then
+            rButton.RemoteIcon.Image = "http://www.roblox.com/asset/?id=413369623"
+        end
+        buttonOffset = buttonOffset + 35
+        rButton.Position = UDim2.new(0.0912411734, 0, 0, buttonOffset)
+        if #remotes > 8 then
+            scrollSizeOffset = scrollSizeOffset + 35
+            RemoteScrollFrame.CanvasSize = UDim2.new(0, 0, 0, scrollSizeOffset)
+        end
+    else
+        -- the remote has been found, increment the remote's button's number text
+        remoteButtons[i].Text = tostring(tonumber(remoteButtons[i].Text) + 1)
+        -- get the size in pixels of the number text and change the name's position accordingly
+        local numberTextsize = getTextSize(TextService, remoteButtons[i].Text, remoteButtons[i].TextSize, remoteButtons[i].Font, Vector2.new(math.huge, math.huge))
+        remoteButtons[i].Parent.RemoteName.Position = UDim2.new(0,numberTextsize.X + 10, 0, 0)
+        remoteButtons[i].Parent.RemoteName.Size = UDim2.new(0, 149 -numberTextsize.X, 0, 26)
+
+        -- update the arguments
+        remoteArgs[i] = args
+
+        -- update the codebox if the player is looking at it
+        if lookingAt and lookingAt == remote and lookingAtButton == remoteButtons[i] and InfoFrame.Visible then
+            local fireFunction = ":FireServer("
+            if isA(remote, "RemoteFunction") then
+                fireFunction = ":InvokeServer("
+            end
+            Code.Text = GetFullPathOfAnInstance(remote)..fireFunction..convertTableToString(remoteArgs[i])..")"
+            local textsize = getTextSize(TextService, Code.Text, Code.TextSize, Code.Font, Vector2.new(math.huge, math.huge))
+            CodeFrame.CanvasSize = UDim2.new(0, textsize.X + 11, 2, 0)
+        end
+    end
+    ;(set_thread_context or syn.set_thread_identity)(currentId)
+end
+
+local OldEvent
+OldEvent = hookfunction(Instance.new("RemoteEvent").FireServer, function(Self, ...)
+    if not checkcaller() and table.find(BlockList, Self) then
+        return
+    elseif table.find(IgnoreList, Self) then
+        --if ignored then don't call the addToList
+        return OldEvent(Self, ...)
+    end
+    addToList(true, Self, ...)
+end)
+
+local OldFunction
+OldFunction = hookfunction(Instance.new("RemoteFunction").InvokeServer, function(Self, ...)
+    if not checkcaller() and table.find(BlockList, Self) then
+        return
+    elseif table.find(IgnoreList, Self) then
+        --if ignored then don't call the addToList
+        return OldFunction(Self, ...)
+    end
+    addToList(false, Self, ...)
+end)
+
+-- game namecall hook (makes the script detect the remotes, basically)
+local OldNamecall
+OldNamecall = hookmetamethod(game,"__namecall",function(...)
+    local args = {...}
+    local Self = args[1]
+    local method = (getnamecallmethod or get_namecall_method)()
+    if method == "FireServer" and isA(Self, "RemoteEvent")  then
+        -- if the remote is blocked and the remote is being fired by the game then block it
+        if not checkcaller() and table.find(BlockList, Self) then
+            return
+        elseif table.find(IgnoreList, Self) then
+            --if ignored then don't call the addToList
+            return OldNamecall(...)
+        end
+        addToList(true, ...)
+    elseif method == "InvokeServer" and isA(Self, 'RemoteFunction') then
+        if not checkcaller() and table.find(BlockList, Self) then
+            return
+        elseif table.find(IgnoreList, Self) then
+            return OldNamecall(...)
+        end
+        addToList(false, ...)
+    end
+
+    return OldNamecall(...)
+end)
